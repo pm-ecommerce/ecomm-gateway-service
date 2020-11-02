@@ -1,0 +1,21 @@
+version: "3"
+
+services:
+  gateway-service:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    environment:
+      SPRING_CLOUD_CONFIG_URI: http://pm-ecomm-config:9090
+      EUREKA_CLIENT_SERVICEURL_DEFAULTZONE: http://pm-ecomm-eureka:8761/eureka
+    external_links:
+      - mysql
+      - pm-ecomm-eureka
+      - pm-ecomm-config
+    ports:
+      - "8080:8080"
+    networks:
+      - ecommerce
+
+networks:
+  ecommerce:
