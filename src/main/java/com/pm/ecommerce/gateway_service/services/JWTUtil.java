@@ -4,6 +4,7 @@ import com.pm.ecommerce.entities.Account;
 import io.jsonwebtoken.Claims;
 import io.jsonwebtoken.Jwts;
 import io.jsonwebtoken.SignatureAlgorithm;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Component;
 
 import java.util.Date;
@@ -15,7 +16,8 @@ import java.util.function.Function;
 public class JWTUtil {
     public static final long serialVersionUID = -2550185165626007488L;
 
-    private String SECRET_KEY = "sibtain";
+    @Value("${jwt.secret:sibtain}")
+    private String SECRET_KEY;
 
     public String extractUsername(String token) {
         return extractClaim(token, Claims::getSubject);
