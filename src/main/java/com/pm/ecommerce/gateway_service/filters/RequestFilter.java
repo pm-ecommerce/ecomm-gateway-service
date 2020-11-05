@@ -9,6 +9,7 @@ import com.pm.ecommerce.gateway_service.repositories.EmployeeRepository;
 import com.pm.ecommerce.gateway_service.repositories.RoleRepository;
 import com.pm.ecommerce.gateway_service.services.JWTUtil;
 import io.jsonwebtoken.Claims;
+import lombok.SneakyThrows;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.http.HttpStatus;
@@ -58,20 +59,17 @@ public class RequestFilter extends ZuulFilter {
 
     private boolean isAllowedServiceAccess(String service, String type) {
         switch (type) {
+            case "user":
             case "guest":
                 return service.equals("pm-accounts")
                         || service.equals("pm-search")
-                        || service.equals("pm-shopping-cart");
-
-            case "user":
-                return service.equals("pm-accounts")
-                        || service.equals("pm-search")
                         || service.equals("pm-shopping-cart")
-                        || service.equals("orders");
+                        || service.equals("pm-orders");
 
             case "vendor":
                 return service.equals("pm-accounts")
-                        || service.equals("orders")
+                        || service.equals("pm-orders")
+                        || service.equals("pm-reports")
                         || service.equals("pm-products");
         }
         return true;
@@ -84,6 +82,7 @@ public class RequestFilter extends ZuulFilter {
         requestContext.setResponseStatusCode(HttpStatus.UNAUTHORIZED.value());
     }
 
+    @SneakyThrows
     @Override
     public Object run() {
         RequestContext requestContext = RequestContext.getCurrentContext();
@@ -95,11 +94,25 @@ public class RequestFilter extends ZuulFilter {
             String type = "guest";
             int id = 0;
 
+            String requestPath = httpServletRequest.getServletPath().substring(1);
+            String serviceName = requestPath.substring(0, requestPath.indexOf("/"));
+
+            if (requestPath.contains("login")) {
+                System.out.println("Allow login to " + type);
+                return null;
+            }
+
             if (authorizationHeader != null) {
                 jwt = authorizationHeader;
                 Claims claims = jwtUtil.extractAllClaims(jwt);
-                type = (String) claims.get("type");
+                type = ((String) claims.get("type")).toLowerCase();
                 id = (int) claims.get("id");
+            }
+
+            if (!isAllowedServiceAccess(serviceName, type)) {
+                blockUser(requestContext);
+                System.out.println("Blocking access to service " + serviceName + " for " + type);
+                return null;
             }
 
             Role role = null;
@@ -112,20 +125,18 @@ public class RequestFilter extends ZuulFilter {
                 }
             }
 
-            String requestPath = httpServletRequest.getServletPath().substring(1);
-            String serviceName = requestPath.substring(0, requestPath.indexOf("/"));
-
-            if (!isAllowedServiceAccess(serviceName, type)) {
-                blockUser(requestContext);
-                return null;
-            }
-
 
             if (role == null) {
                 role = roleRepository.findRoleByName(type);
             }
 
+            if (type.equals("user") && role == null) {
+                role = roleRepository.findRoleByName("guest");
+            }
+
+            System.out.println("Detected type: " + type);
             if (role != null) {
+                System.out.println("Detected role: " + role.getName());
                 List<Permission> permissions = role.getPermissions();
                 if (!type.equals("guest")) {
                     Role role1 = roleRepository.findRoleByName("guest");
@@ -135,14 +146,16 @@ public class RequestFilter extends ZuulFilter {
                     }
                 }
 
+                System.out.println("Total permissions: " + permissions.size());
                 for (Permission permission : permissions) {
                     String path = httpServletRequest.getServletPath();
                     path = path.substring(1);
                     path = path.substring(path.indexOf("/"));
 
                     String method = httpServletRequest.getMethod();
-
-                    if (permission.getPath().equals("*")) {
+                    System.out.println("Matching: " + permission.getPath() + " with " + path);
+                    if (permission.getPath().equals("*") || permission.getPath().equals("/")) {
+                        System.out.println("Checking method permission: " + permission.getAction() + " with " + method);
                         allowedRequest = isMethodMatch(permission, method);
                         break;
                     }
@@ -151,12 +164,12 @@ public class RequestFilter extends ZuulFilter {
                     String[] allowedPaths = permission.getPath().split("/");
 
                     if (paths.length != allowedPaths.length) {
-                        break;
+                        continue;
                     }
 
                     boolean pathMatched = true;
                     for (int i = 0; i < paths.length; i++) {
-                        if (allowedPaths[i].equals("*")) {
+                        if (allowedPaths[i].contains("{") && allowedPaths[i].contains("}")) {
                             continue;
                         }
                         if (!allowedPaths[i].equals(paths[i])) {
@@ -167,6 +180,9 @@ public class RequestFilter extends ZuulFilter {
 
                     if (pathMatched) {
                         allowedRequest = isMethodMatch(permission, method);
+                        if (allowedRequest) {
+                            break;
+                        }
                     }
                 }
             }
